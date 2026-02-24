@@ -1,6 +1,7 @@
 """
 Configuration module for Sign Language Recognition System.
 Centralizes all paths and parameters for easy modification.
+Author: Sign Language Detection Team
 """
 
 import os
@@ -14,6 +15,8 @@ SRC_DIR = os.path.join(BASE_DIR, "src")
 # Model paths
 MODEL_PATH = os.path.join(MODEL_DIR, "asl_landmark_dl_model.h5")
 MODEL_PATH_KERAS = os.path.join(MODEL_DIR, "asl_landmark_dl_model.keras")
+MLP_MODEL_PATH = os.path.join(MODEL_DIR, "mlp_model.keras")
+LSTM_MODEL_PATH = os.path.join(MODEL_DIR, "lstm_model.keras")
 
 # Class names
 CLASS_NAMES = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -52,6 +55,17 @@ INFERENCE = {
     "confidence_threshold": 0.7,
     "smoothing_buffer_size": 10,  # Number of frames for majority voting
     "use_smoothing": True,
+}
+
+# LSTM settings
+LSTM = {
+    "sequence_length": 20,  # Number of frames in sequence
+    "lstm_units": 128,
+    "dense_units": 64,
+    "dropout_rate": 0.3,
+    "epochs": 50,
+    "batch_size": 16,
+    "validation_split": 0.2,
 }
 
 # GUI settings

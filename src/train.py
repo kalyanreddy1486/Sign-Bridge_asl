@@ -121,6 +121,7 @@ def plot_training_history(history, save_path):
     print(f"Training history saved to: {save_path}")
 
 
+# Main training function for ASL model
 def train():
     """Main training function."""
     

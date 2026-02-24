@@ -18,6 +18,7 @@ from config import config
 from utils import extract_landmarks_from_hand, compute_landmark_stability, check_data_balance
 
 
+# Data collector class for ASL dataset
 class DataCollector:
     """Automatic and manual data collection for ASL."""
     

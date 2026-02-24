@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import config
 
 
+# Prediction smoother using majority voting
 class PredictionSmoother:
     """
     Smooths predictions using majority voting over a buffer of recent frames.

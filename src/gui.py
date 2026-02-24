@@ -17,6 +17,7 @@ from tkinter import Label, Button, Frame, messagebox
 from PIL import Image, ImageTk
 import threading
 import queue
+import time
 
 from config import config
 from utils import (
@@ -28,6 +29,7 @@ from utils import (
 
 
 class VideoThread(threading.Thread):
+    """Video capture and inference thread for ASL recognition."""
     """
     Thread for video capture and inference.
     Runs separately from GUI to prevent freezing.
@@ -216,13 +218,116 @@ class VideoThread(threading.Thread):
         self.running = False
 
 
+class TextBuilder:
+    """Text builder that converts stable predictions into typed text."""
+    
+    def __init__(self, stability_time=0.8, cooldown_time=1.5, confidence_threshold=0.8):
+        self.stability_time = stability_time  # Time to hold sign before adding
+        self.cooldown_time = cooldown_time    # Cooldown after adding letter
+        self.confidence_threshold = confidence_threshold
+        
+        self.sentence = ""                    # Built sentence
+        self.current_letter = None            # Currently detected letter
+        self.letter_start_time = None         # When current letter was first seen
+        self.last_add_time = 0                # When last letter was added
+        self.no_hand_start_time = None        # When hand was lost (for space)
+        self.space_timeout = 1.2              # No hand time to add space
+        
+    def update(self, letter, confidence, hand_detected):
+        """
+        Update with new prediction. Returns dict with status info.
+        """
+        current_time = time.time()
+        result = {
+            "letter_added": None,
+            "stability_progress": 0.0,
+            "in_cooldown": False,
+            "cooldown_remaining": 0.0
+        }
+        
+        # Check cooldown
+        time_since_add = current_time - self.last_add_time
+        if time_since_add < self.cooldown_time:
+            result["in_cooldown"] = True
+            result["cooldown_remaining"] = self.cooldown_time - time_since_add
+            return result
+        
+        # Handle no hand - potential space
+        if not hand_detected:
+            if self.no_hand_start_time is None:
+                self.no_hand_start_time = current_time
+            elif current_time - self.no_hand_start_time >= self.space_timeout:
+                # Add space if sentence exists and doesn't end with space
+                if self.sentence and not self.sentence.endswith(" "):
+                    self.sentence += " "
+                    result["letter_added"] = "[SPACE]"
+                    self.last_add_time = current_time
+                self.no_hand_start_time = None
+            
+            # Reset letter tracking
+            self.current_letter = None
+            self.letter_start_time = None
+            return result
+        
+        # Hand detected - reset no-hand timer
+        self.no_hand_start_time = None
+        
+        # Check confidence threshold
+        if confidence < self.confidence_threshold:
+            self.current_letter = None
+            self.letter_start_time = None
+            return result
+        
+        # Same letter as before?
+        if letter == self.current_letter:
+            # Calculate stability progress
+            if self.letter_start_time:
+                elapsed = current_time - self.letter_start_time
+                result["stability_progress"] = min(1.0, elapsed / self.stability_time)
+                
+                # Add letter if stable long enough
+                if elapsed >= self.stability_time:
+                    self.sentence += letter
+                    result["letter_added"] = letter
+                    self.last_add_time = current_time
+                    self.current_letter = None
+                    self.letter_start_time = None
+        else:
+            # New letter - start tracking
+            self.current_letter = letter
+            self.letter_start_time = current_time
+            result["stability_progress"] = 0.0
+        
+        return result
+    
+    def delete_last(self):
+        """Delete the last character."""
+        if self.sentence:
+            self.sentence = self.sentence[:-1]
+    
+    def add_space(self):
+        """Manually add a space."""
+        if self.sentence and not self.sentence.endswith(" "):
+            self.sentence += " "
+    
+    def clear(self):
+        """Clear the entire sentence."""
+        self.sentence = ""
+        self.current_letter = None
+        self.letter_start_time = None
+    
+    def get_sentence(self):
+        """Get the current sentence."""
+        return self.sentence
+
+
 class ASLGUI:
-    """Main GUI application for ASL recognition."""
+    """Main GUI application for ASL recognition with Text Builder."""
     
     def __init__(self):
         self.window = tk.Tk()
-        self.window.title(config.GUI["window_title"])
-        self.window.geometry(config.GUI["window_size"])
+        self.window.title(config.GUI["window_title"] + " - Text Builder")
+        self.window.geometry("900x750")  # Larger window for text builder
         self.window.resizable(False, False)
         
         # Queues for thread communication
@@ -232,7 +337,15 @@ class ASLGUI:
         # Video thread
         self.video_thread = None
         
+        # Text Builder
+        self.text_builder = TextBuilder(
+            stability_time=0.8,
+            cooldown_time=1.5,
+            confidence_threshold=0.8
+        )
+        
         self.setup_ui()
+        self.setup_keyboard_bindings()
         self.check_errors()
         
         # Auto-start camera if model exists
@@ -243,7 +356,7 @@ class ASLGUI:
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
     
     def setup_ui(self):
-        """Setup the user interface."""
+        """Setup the user interface with Text Builder."""
         # Video frame with fixed size
         self.video_frame = Frame(
             self.window,
@@ -251,8 +364,8 @@ class ASLGUI:
             height=config.GUI["video_height"],
             bg="black"
         )
-        self.video_frame.pack(pady=10)
-        self.video_frame.pack_propagate(False)  # Prevent frame from shrinking
+        self.video_frame.pack(pady=5)
+        self.video_frame.pack_propagate(False)
         
         # Video display inside frame
         self.video_label = Label(self.video_frame, bg="black")
@@ -260,13 +373,13 @@ class ASLGUI:
         
         # Status frame
         status_frame = Frame(self.window)
-        status_frame.pack(pady=5)
+        status_frame.pack(pady=3)
         
         # Hand detection indicator
         self.hand_indicator = Label(
             status_frame, 
             text="● No Hand", 
-            font=("Arial", 12),
+            font=("Arial", 11),
             fg="red"
         )
         self.hand_indicator.pack(side=tk.LEFT, padx=10)
@@ -275,7 +388,7 @@ class ASLGUI:
         self.stability_label = Label(
             status_frame,
             text="Stability: -",
-            font=("Arial", 12),
+            font=("Arial", 11),
             fg="gray"
         )
         self.stability_label.pack(side=tk.LEFT, padx=10)
@@ -284,25 +397,25 @@ class ASLGUI:
         self.prediction_label = Label(
             self.window,
             text="Prediction: -",
-            font=("Arial", 28, "bold"),
+            font=("Arial", 24, "bold"),
             fg="green"
         )
-        self.prediction_label.pack(pady=10)
+        self.prediction_label.pack(pady=5)
         
         # Confidence bar
         self.confidence_frame = Frame(self.window)
-        self.confidence_frame.pack(pady=5)
+        self.confidence_frame.pack(pady=3)
         
         Label(
             self.confidence_frame,
             text="Confidence:",
-            font=("Arial", 12)
+            font=("Arial", 11)
         ).pack(side=tk.LEFT)
         
         self.confidence_bar = Frame(
             self.confidence_frame,
             width=200,
-            height=20,
+            height=18,
             bg="lightgray",
             relief=tk.SUNKEN,
             bd=1
@@ -312,7 +425,7 @@ class ASLGUI:
         self.confidence_fill = Frame(
             self.confidence_bar,
             width=0,
-            height=18,
+            height=16,
             bg="green"
         )
         self.confidence_fill.place(x=1, y=1)
@@ -320,19 +433,177 @@ class ASLGUI:
         self.confidence_text = Label(
             self.confidence_frame,
             text="0%",
-            font=("Arial", 12),
+            font=("Arial", 11),
             width=5
         )
         self.confidence_text.pack(side=tk.LEFT)
+        
+        # ========== TEXT BUILDER SECTION ==========
+        separator = Frame(self.window, height=2, bg="gray")
+        separator.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Letter confirmation progress bar
+        progress_frame = Frame(self.window)
+        progress_frame.pack(pady=3)
+        
+        Label(
+            progress_frame,
+            text="Hold to confirm:",
+            font=("Arial", 11)
+        ).pack(side=tk.LEFT)
+        
+        self.progress_bar = Frame(
+            progress_frame,
+            width=300,
+            height=20,
+            bg="lightgray",
+            relief=tk.SUNKEN,
+            bd=1
+        )
+        self.progress_bar.pack(side=tk.LEFT, padx=5)
+        
+        self.progress_fill = Frame(
+            self.progress_bar,
+            width=0,
+            height=18,
+            bg="blue"
+        )
+        self.progress_fill.place(x=1, y=1)
+        
+        self.progress_text = Label(
+            progress_frame,
+            text="0%",
+            font=("Arial", 11),
+            width=5
+        )
+        self.progress_text.pack(side=tk.LEFT)
+        
+        # Status label for text builder
+        self.builder_status = Label(
+            self.window,
+            text="Hold a sign steady for 0.8s to add it",
+            font=("Arial", 10),
+            fg="gray"
+        )
+        self.builder_status.pack(pady=3)
+        
+        # Text display area
+        text_label = Label(
+            self.window,
+            text="Constructed Text:",
+            font=("Arial", 12, "bold")
+        )
+        text_label.pack(pady=(5, 0))
+        
+        self.text_display = Label(
+            self.window,
+            text="_",
+            font=("Courier", 20),
+            fg="#333",
+            bg="#f0f0f0",
+            width=40,
+            height=2,
+            relief=tk.SUNKEN,
+            anchor="w",
+            padx=10
+        )
+        self.text_display.pack(pady=5, padx=20)
+        
+        # Control buttons
+        button_frame = Frame(self.window)
+        button_frame.pack(pady=10)
+        
+        self.space_btn = Button(
+            button_frame,
+            text="Space",
+            font=("Arial", 11),
+            width=8,
+            command=self.on_space_click
+        )
+        self.space_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.delete_btn = Button(
+            button_frame,
+            text="Delete",
+            font=("Arial", 11),
+            width=8,
+            command=self.on_delete_click
+        )
+        self.delete_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.clear_btn = Button(
+            button_frame,
+            text="Clear All",
+            font=("Arial", 11),
+            width=8,
+            command=self.on_clear_click
+        )
+        self.clear_btn.pack(side=tk.LEFT, padx=5)
         
         # Info label
         self.info_label = Label(
             self.window,
             text="Initializing camera...",
-            font=("Arial", 10),
+            font=("Arial", 9),
             fg="gray"
         )
-        self.info_label.pack(pady=5)
+        self.info_label.pack(pady=3)
+        
+        # Instructions
+        instructions = Label(
+            self.window,
+            text="Hold sign steady to add | No hand for 1.2s = Space | Backspace = Delete",
+            font=("Arial", 9),
+            fg="#666"
+        )
+        instructions.pack(pady=2)
+    
+    def setup_keyboard_bindings(self):
+        """Setup keyboard shortcuts."""
+        self.window.bind("<BackSpace>", lambda e: self.on_delete_click())
+        self.window.bind("<space>", lambda e: self.on_space_click())
+        self.window.bind("<Escape>", lambda e: self.on_clear_click())
+    
+    def on_space_click(self):
+        """Handle space button click."""
+        self.text_builder.add_space()
+        self.update_text_display()
+    
+    def on_delete_click(self):
+        """Handle delete button click."""
+        self.text_builder.delete_last()
+        self.update_text_display()
+    
+    def on_clear_click(self):
+        """Handle clear button click."""
+        self.text_builder.clear()
+        self.update_text_display()
+    
+    def update_text_display(self):
+        """Update the text display with current sentence."""
+        sentence = self.text_builder.get_sentence()
+        display_text = sentence + "_" if sentence else "_"
+        self.text_display.config(text=display_text)
+    
+    def update_progress_bar(self, progress, in_cooldown=False, cooldown_remaining=0):
+        """Update the letter confirmation progress bar."""
+        max_width = 298
+        
+        if in_cooldown:
+            # Show cooldown in orange
+            fill_width = int(max_width * (cooldown_remaining / 1.5))
+            self.progress_fill.config(width=fill_width, bg="orange")
+            self.progress_text.config(text=f"{cooldown_remaining:.1f}s")
+            self.builder_status.config(text="Cooldown - wait before next letter", fg="orange")
+        else:
+            fill_width = int(max_width * progress)
+            self.progress_fill.config(width=fill_width, bg="blue")
+            self.progress_text.config(text=f"{progress:.0%}")
+            
+            if progress > 0:
+                self.builder_status.config(text="Keep holding to confirm...", fg="blue")
+            else:
+                self.builder_status.config(text="Hold a sign steady for 0.8s to add it", fg="gray")
     
     def start_camera(self):
         """Start the camera and video thread."""
@@ -423,10 +694,38 @@ class ASLGUI:
                         fg="green" if stability > 0.8 else "orange"
                     )
                     self.update_confidence_bar(conf)
+                    
+                    # Update text builder
+                    builder_result = self.text_builder.update(
+                        letter, conf, prediction_data["hand_detected"]
+                    )
+                    
+                    # Check if letter was added
+                    if builder_result["letter_added"]:
+                        self.update_text_display()
+                        self.builder_status.config(
+                            text=f"Added: {builder_result['letter_added']}",
+                            fg="green"
+                        )
+                    
+                    # Update progress bar
+                    self.update_progress_bar(
+                        builder_result["stability_progress"],
+                        builder_result["in_cooldown"],
+                        builder_result["cooldown_remaining"]
+                    )
                 else:
                     self.prediction_label.config(text="Prediction: -", fg="gray")
                     self.stability_label.config(text="Stability: -", fg="gray")
                     self.update_confidence_bar(0)
+                    
+                    # Update text builder for no hand (potential space)
+                    builder_result = self.text_builder.update(
+                        None, 0, prediction_data["hand_detected"]
+                    )
+                    if builder_result["letter_added"]:
+                        self.update_text_display()
+                    self.update_progress_bar(0)
                 
             except queue.Empty:
                 # No frame available yet, continue
