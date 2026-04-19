@@ -14,6 +14,7 @@ import time
 import numpy as np
 import cv2
 import mediapipe as mp
+import mediapipe.python.solutions.hands as _mp_hands_force_import  # noqa: F401
 import tensorflow as tf
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
