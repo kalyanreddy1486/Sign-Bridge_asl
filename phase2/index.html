@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Type a word — watch each letter signed in American Sign Language fingerspelling.">
+    <meta name="theme-color" content="#efeae0">
+    <title>ASL Fingerspell — Sign Any Word</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="page">
+
+        <header id="app-header">
+            <a href="/" class="mode-link" title="Switch to sign → word detection">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                <span>detect signs</span>
+            </a>
+            <div class="wordmark">asl <em>fingerspell</em></div>
+            <div class="top-meta">type · watch · learn</div>
+        </header>
+
+        <nav id="letter-gallery" aria-label="A to Z letter jump">
+            <div class="gallery-container" role="tablist"></div>
+        </nav>
+
+        <main id="stage">
+            <div class="stage-head">
+                <span class="hud-label">Now signing</span>
+                <span class="hud-pill"><em id="current-letter">–</em></span>
+            </div>
+
+            <div id="video-container" aria-label="ASL fingerspelling video" aria-live="polite" aria-atomic="true">
+                <video id="sign-video-a" class="video-layer active" muted playsinline preload="auto"></video>
+                <video id="sign-video-b" class="video-layer" muted playsinline preload="auto"></video>
+
+                <div id="space-overlay" aria-hidden="true">
+                    <svg viewBox="0 0 240 140" xmlns="http://www.w3.org/2000/svg" role="presentation">
+                        <path d="M 40 50 L 140 50 L 140 20 L 220 70 L 140 120 L 140 90 L 40 90 C 10 90, 10 50, 40 50 Z"
+                              fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+                    </svg>
+                </div>
+
+                <div id="progress-bar" aria-hidden="true">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+
+            <div id="chip-bar" class="chip-bar" aria-label="Word progress"></div>
+        </main>
+
+        <div class="input-wrapper">
+            <label for="word-input" class="sr-only">Type a word or sentence</label>
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2.5" y="6" width="19" height="12" rx="2"/>
+                <path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>
+            </svg>
+            <input
+                type="text"
+                id="word-input"
+                placeholder="type a word or sentence…"
+                autocomplete="off"
+                spellcheck="false"
+                inputmode="text"
+                autocapitalize="characters"
+                maxlength="60"
+            >
+            <button type="button" id="btn-clear" class="btn-inline" aria-label="Clear input" title="Clear">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6L6 18"/>
+                </svg>
+            </button>
+            <button type="button" id="btn-play" class="btn-play-primary" title="Play / pause (Space)" aria-pressed="false" aria-label="Play or pause">
+                <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 5v14l12-7z" fill="currentColor"/>
+                </svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/>
+                    <rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/>
+                </svg>
+            </button>
+        </div>
+
+        <footer id="controls-container">
+            <div class="nav-btns">
+                <button class="icon-btn" id="btn-prev" title="Previous letter (←)" aria-label="Previous letter">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-next" title="Next letter (→)" aria-label="Next letter">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button class="icon-btn" id="btn-restart" title="Restart (R)" aria-label="Restart">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M3 12a9 9 0 1 1 3 6.7M3 19v-6h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="speed-block" aria-label="Playback speed">
+                <span class="speed-lbl">speed</span>
+                <div class="speed-track-wrap">
+                    <input type="range" id="speed-slider" min="0.5" max="2" step="0.1" value="1" aria-label="Playback speed">
+                </div>
+                <span id="speed-value" class="speed-val">1.0<em>×</em></span>
+            </div>
+
+            <button class="voice-toggle" id="btn-tts" title="Speak letter aloud (M)" aria-label="Toggle speech" aria-pressed="false">
+                <span class="voice-dot"></span>
+                <span class="voice-label">voice</span>
+            </button>
+        </footer>
+
+        <div id="hotkey-hints" aria-hidden="true">
+            <span><kbd>/</kbd> focus</span>
+            <span><kbd>space</kbd> play</span>
+            <span><kbd>←</kbd> <kbd>→</kbd> step</span>
+            <span><kbd>r</kbd> restart</span>
+            <span><kbd>m</kbd> voice</span>
+        </div>
+
+    </div>
+
+    <script src="app.js" defer></script>
+</body>
+</html>

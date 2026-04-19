@@ -1,0 +1,47 @@
+# Keep the image slim: exclude everything not needed at runtime.
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python caches + local venv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Node build caches — we install fresh in the build stage
+web_ui/node_modules/
+web_ui/.vite/
+
+# Training artifacts (the live model is committed; the rest is regeneratable)
+models/*_confusion_matrix.png
+models/*_training_history.png
+models/*_metrics.json
+
+# Training data — not needed for inference
+data/
+
+# Docs / dev-only files
+docs/
+tests/
+*.md
+!README.md
+LICENSE
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local agent state
+.claude/
+.superpowers/
+.tools/
+
+# Env files — supply real ones via the platform's secret manager
+.env
+.env.local

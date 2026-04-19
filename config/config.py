@@ -84,3 +84,12 @@ MEDIAPIPE = {
     "min_detection_confidence": 0.7,
     "min_tracking_confidence": 0.7,
 }
+
+# Phase 2 settings (typed text -> 3D hand playback)
+PHASE2 = {
+    "enabled": True,
+    "max_text_length": 120,
+    "letter_hold_ms": 700,
+    "space_hold_ms": 400,
+    "pose_precision": 5,
+}
