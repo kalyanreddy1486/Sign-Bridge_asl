@@ -1,8 +1,20 @@
+---
+title: Sign Bridge ASL
+emoji: 🤟
+colorFrom: indigo
+colorTo: yellow
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Two-way ASL — sign → text and text → sign in one app
+---
+
 # ASL Two-Way Bridge
 
 A real-time American Sign Language recognition app with **two directions in one interface**:
 
-- **Phase 1 — Sign → Text.** Webcam feed in the browser, MediaPipe hand landmarks extracted server-side, a lightweight MLP classifies A–Z, and a temporal stability window builds sentences while you sign.
+- **Phase 1 — Sign → Text.** The browser captures your webcam with `getUserMedia` and streams JPEG frames over Socket.IO. The server runs MediaPipe hand landmarks + a lightweight MLP (A–Z) and sends predictions back. A temporal stability window builds sentences while you sign.
 - **Phase 2 — Text → Sign.** Type a sentence and the app plays the corresponding ASL video clips back to you, letter by letter.
 
 Both phases share a single Flask + Socket.IO backend and a warm-minimal UI.

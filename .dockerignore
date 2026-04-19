@@ -21,8 +21,9 @@ models/*_confusion_matrix.png
 models/*_training_history.png
 models/*_metrics.json
 
-# Training data — not needed for inference
-data/
+# NOTE: data/ASL_Data/ IS needed at runtime — load_phase2_pose_library()
+# builds canonical per-letter hand poses from the .npy samples at startup.
+# Keep it in the image.
 
 # Docs / dev-only files
 docs/

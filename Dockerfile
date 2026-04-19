@@ -47,8 +47,10 @@ COPY phase2/ ./phase2/
 # Copy the frontend bundle built in stage 1
 COPY --from=frontend /web_ui/dist ./web_ui/dist
 
+# HF Spaces convention: listen on 7860.
+# Override PORT at docker-run time if deploying somewhere else.
 ENV HOST=0.0.0.0 \
-    PORT=5000
-EXPOSE 5000
+    PORT=7860
+EXPOSE 7860
 
 CMD ["python", "web_server.py"]

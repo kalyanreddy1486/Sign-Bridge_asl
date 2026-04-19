@@ -7,12 +7,19 @@ const SOCKET_URL =
     ? window.location.origin
     : 'http://localhost:5000';
 
+// Browser-side capture settings. Keep resolution modest — MediaPipe handles
+// 480p fine and it keeps the uplink bandwidth low for remote deploys.
+const CAPTURE_WIDTH = 480;
+const CAPTURE_HEIGHT = 360;
+const FRAME_INTERVAL_MS = 120; // ~8fps. Leaves headroom for server inference.
+const JPEG_QUALITY = 0.7;
+
 const App = () => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
-  const [frame, setFrame] = useState(null);
+  const [cameraError, setCameraError] = useState(null);
   const [prediction, setPrediction] = useState({
     hand_detected: false,
     letter: null,
@@ -28,41 +35,39 @@ const App = () => {
   });
   const [showAddedToast, setShowAddedToast] = useState(false);
   const [addedLetter, setAddedLetter] = useState('');
+
+  const socketRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const frameTimerRef = useRef(null);
   const toastTimerRef = useRef(null);
 
+  // ---------------------------------------------------------------------
+  // Socket lifecycle
+  // ---------------------------------------------------------------------
   useEffect(() => {
     const newSocket = io(SOCKET_URL, { reconnection: true });
     setSocket(newSocket);
+    socketRef.current = newSocket;
 
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => {
       setConnected(false);
-      setCameraActive(false);
-      setCameraStarting(false);
     };
     const handleFrameUpdate = (data) => {
-      setFrame(data.frame);
-      setPrediction(data.prediction);
-      setTextBuilder(data.text_builder);
-      setCameraStarting(false);
-
-      if (data.text_builder.letter_added) {
-        setAddedLetter(data.text_builder.letter_added);
-        setShowAddedToast(true);
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = setTimeout(() => {
-          setShowAddedToast(false);
-          toastTimerRef.current = null;
-        }, 1500);
-      }
-    };
-    const handleCameraStatus = (data) => {
-      if (data.status === 'started') {
-        setCameraActive(true);
-      } else if (data.status === 'stopped') {
-        setCameraActive(false);
-        setCameraStarting(false);
-        setFrame(null);
+      if (data.prediction) setPrediction(data.prediction);
+      if (data.text_builder) {
+        setTextBuilder(data.text_builder);
+        if (data.text_builder.letter_added) {
+          setAddedLetter(data.text_builder.letter_added);
+          setShowAddedToast(true);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          toastTimerRef.current = setTimeout(() => {
+            setShowAddedToast(false);
+            toastTimerRef.current = null;
+          }, 1500);
+        }
       }
     };
     const handleTextCleared = () => {
@@ -75,7 +80,6 @@ const App = () => {
     newSocket.on('connect', handleConnect);
     newSocket.on('disconnect', handleDisconnect);
     newSocket.on('frame_update', handleFrameUpdate);
-    newSocket.on('camera_status', handleCameraStatus);
     newSocket.on('text_cleared', handleTextCleared);
     newSocket.on('text_updated', handleTextUpdated);
 
@@ -83,7 +87,6 @@ const App = () => {
       newSocket.off('connect', handleConnect);
       newSocket.off('disconnect', handleDisconnect);
       newSocket.off('frame_update', handleFrameUpdate);
-      newSocket.off('camera_status', handleCameraStatus);
       newSocket.off('text_cleared', handleTextCleared);
       newSocket.off('text_updated', handleTextUpdated);
       newSocket.close();
@@ -94,27 +97,118 @@ const App = () => {
     };
   }, []);
 
-  const toggleCamera = useCallback(() => {
-    if (!socket) return;
-    if (cameraActive) {
-      socket.emit('stop_camera');
-    } else {
-      setCameraStarting(true);
-      socket.emit('start_camera');
+  // ---------------------------------------------------------------------
+  // Camera + frame pump
+  // ---------------------------------------------------------------------
+  const stopFramePump = useCallback(() => {
+    if (frameTimerRef.current) {
+      clearInterval(frameTimerRef.current);
+      frameTimerRef.current = null;
     }
-  }, [socket, cameraActive]);
+  }, []);
 
+  const stopCamera = useCallback(() => {
+    stopFramePump();
+    const stream = streamRef.current;
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+    setCameraStarting(false);
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('reset_stream');
+    }
+    setPrediction({ hand_detected: false, letter: null, confidence: 0, stability: 0 });
+  }, [stopFramePump]);
+
+  const startFramePump = useCallback(() => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    canvas.width = CAPTURE_WIDTH;
+    canvas.height = CAPTURE_HEIGHT;
+    const ctx = canvas.getContext('2d');
+
+    stopFramePump();
+    frameTimerRef.current = setInterval(() => {
+      if (!socketRef.current || !socketRef.current.connected) return;
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      // Mirror horizontally so what the user sees matches the training data
+      // (the original OpenCV pipeline did cv2.flip(frame, 1)).
+      ctx.save();
+      ctx.translate(CAPTURE_WIDTH, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+      ctx.restore();
+
+      const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+      socketRef.current.emit('video_frame', dataUrl);
+    }, FRAME_INTERVAL_MS);
+  }, [stopFramePump]);
+
+  const startCamera = useCallback(async () => {
+    if (cameraActive || cameraStarting) return;
+    setCameraError(null);
+    setCameraStarting(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: CAPTURE_WIDTH },
+          height: { ideal: CAPTURE_HEIGHT },
+          facingMode: 'user',
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play();
+      }
+      setCameraActive(true);
+      setCameraStarting(false);
+      startFramePump();
+    } catch (err) {
+      console.error('getUserMedia failed:', err);
+      setCameraError(err?.message || 'Camera access denied');
+      setCameraStarting(false);
+      setCameraActive(false);
+    }
+  }, [cameraActive, cameraStarting, startFramePump]);
+
+  const toggleCamera = useCallback(() => {
+    if (cameraActive) {
+      stopCamera();
+    } else {
+      startCamera();
+    }
+  }, [cameraActive, startCamera, stopCamera]);
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, [stopCamera]);
+
+  // ---------------------------------------------------------------------
+  // Text control events
+  // ---------------------------------------------------------------------
   const clearText = useCallback(() => {
-    if (socket) socket.emit('clear_text');
-  }, [socket]);
+    if (socketRef.current) socketRef.current.emit('clear_text');
+  }, []);
 
   const deleteLast = useCallback(() => {
-    if (socket) socket.emit('delete_last');
-  }, [socket]);
+    if (socketRef.current) socketRef.current.emit('delete_last');
+  }, []);
 
   const addSpace = useCallback(() => {
-    if (socket) socket.emit('add_space');
-  }, [socket]);
+    if (socketRef.current) socketRef.current.emit('add_space');
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -128,6 +222,9 @@ const App = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [deleteLast, addSpace, clearText]);
 
+  // ---------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------
   return (
     <div className="page">
       <header id="app-header">
@@ -150,19 +247,30 @@ const App = () => {
         </div>
 
         <div id="video-container">
-          {frame ? (
-            <img src={frame} alt="Camera feed" className="video-feed" />
-          ) : (
+          <video
+            ref={videoRef}
+            className="video-feed"
+            autoPlay
+            playsInline
+            muted
+            style={{
+              display: cameraActive ? 'block' : 'none',
+              transform: 'scaleX(-1)',
+            }}
+          />
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+          {!cameraActive && (
             <div className="video-placeholder">
               <svg viewBox="0 0 24 24" width="56" height="56" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <rect x="2" y="6" width="14" height="12" rx="2" />
                 <path d="M22 8l-6 4 6 4z" />
               </svg>
               <p>
-                {cameraStarting
+                {cameraError
+                  ? `camera error: ${cameraError}`
+                  : cameraStarting
                   ? 'opening camera…'
-                  : cameraActive
-                  ? 'warming up…'
                   : 'press start to begin detecting'}
               </p>
               {cameraStarting && <div className="spinner" aria-hidden="true" />}
@@ -192,10 +300,7 @@ const App = () => {
           <div className="metric">
             <span className="metric-label">confidence</span>
             <div className="metric-bar">
-              <div
-                className="metric-fill"
-                style={{ width: `${prediction.confidence * 100}%` }}
-              />
+              <div className="metric-fill" style={{ width: `${prediction.confidence * 100}%` }} />
             </div>
             <span className="metric-value">
               {(prediction.confidence * 100).toFixed(0)}
@@ -205,10 +310,7 @@ const App = () => {
           <div className="metric">
             <span className="metric-label">stability</span>
             <div className="metric-bar">
-              <div
-                className="metric-fill"
-                style={{ width: `${prediction.stability * 100}%` }}
-              />
+              <div className="metric-fill" style={{ width: `${prediction.stability * 100}%` }} />
             </div>
             <span className="metric-value">
               {(prediction.stability * 100).toFixed(0)}
@@ -228,9 +330,7 @@ const App = () => {
           </span>
         </div>
         <div className="text-display">
-          {textBuilder.sentence || (
-            <span className="placeholder">start signing to build text…</span>
-          )}
+          {textBuilder.sentence || <span className="placeholder">start signing to build text…</span>}
           <span className="cursor">_</span>
         </div>
       </div>
