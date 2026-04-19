@@ -35,6 +35,7 @@ const App = () => {
   });
   const [showAddedToast, setShowAddedToast] = useState(false);
   const [addedLetter, setAddedLetter] = useState('');
+  const [facingMode, setFacingMode] = useState('user');
 
   const socketRef = useRef(null);
   const videoRef = useRef(null);
@@ -42,6 +43,11 @@ const App = () => {
   const streamRef = useRef(null);
   const frameTimerRef = useRef(null);
   const toastTimerRef = useRef(null);
+  const facingModeRef = useRef('user');
+
+  useEffect(() => {
+    facingModeRef.current = facingMode;
+  }, [facingMode]);
 
   // ---------------------------------------------------------------------
   // Socket lifecycle
@@ -138,13 +144,18 @@ const App = () => {
       if (!socketRef.current || !socketRef.current.connected) return;
       if (!video.videoWidth || !video.videoHeight) return;
 
-      // Mirror horizontally so what the user sees matches the training data
-      // (the original OpenCV pipeline did cv2.flip(frame, 1)).
-      ctx.save();
-      ctx.translate(CAPTURE_WIDTH, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-      ctx.restore();
+      // Front camera raw frame is mirror-image of the user (right hand on left
+      // side), so flip it to match the training data. Back camera already
+      // shows the scene in natural orientation — don't flip.
+      if (facingModeRef.current === 'user') {
+        ctx.save();
+        ctx.translate(CAPTURE_WIDTH, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+      }
 
       const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
       socketRef.current.emit('video_frame', dataUrl);
@@ -160,7 +171,7 @@ const App = () => {
         video: {
           width: { ideal: CAPTURE_WIDTH },
           height: { ideal: CAPTURE_HEIGHT },
-          facingMode: 'user',
+          facingMode,
         },
         audio: false,
       });
@@ -179,7 +190,44 @@ const App = () => {
       setCameraStarting(false);
       setCameraActive(false);
     }
-  }, [cameraActive, cameraStarting, startFramePump]);
+  }, [cameraActive, cameraStarting, startFramePump, facingMode]);
+
+  const flipCamera = useCallback(async () => {
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
+    if (!cameraActive) {
+      setFacingMode(newMode);
+      return;
+    }
+    setCameraError(null);
+    stopFramePump();
+    const oldStream = streamRef.current;
+    if (oldStream) {
+      oldStream.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: CAPTURE_WIDTH },
+          height: { ideal: CAPTURE_HEIGHT },
+          facingMode: newMode,
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play();
+      }
+      setFacingMode(newMode);
+      startFramePump();
+    } catch (err) {
+      console.error('camera switch failed:', err);
+      setCameraError(err?.message || 'Back camera not available');
+      setCameraActive(false);
+    }
+  }, [facingMode, cameraActive, stopFramePump, startFramePump]);
 
   const toggleCamera = useCallback(() => {
     if (cameraActive) {
@@ -255,7 +303,7 @@ const App = () => {
             muted
             style={{
               display: cameraActive ? 'block' : 'none',
-              transform: 'scaleX(-1)',
+              transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
             }}
           />
           <canvas ref={canvasRef} style={{ display: 'none' }} />
@@ -354,6 +402,23 @@ const App = () => {
                 <path d="M8 5v14l12-7z" fill="currentColor" />
               </svg>
             )}
+          </button>
+          <button
+            className="icon-btn"
+            onClick={flipCamera}
+            title={facingMode === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
+            aria-label="Flip camera"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M15 7h4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h4M9 4h6v3H9zM8 13l-2 2 2 2M16 13l2 2-2 2M6 15h12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
           <button className="icon-btn" onClick={addSpace} title="Add space (Space)" aria-label="Add space">
             <svg viewBox="0 0 24 24" aria-hidden="true">
