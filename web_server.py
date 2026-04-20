@@ -52,7 +52,9 @@ hands_lock = threading.Lock()
 # visitors each get their own smoother + text builder.
 sessions = {}
 
-STABILITY_TIME = 0.8
+STABILITY_TIME = 0.8         # default hold time in seconds; overridable per session
+MIN_STABILITY_TIME = 0.3
+MAX_STABILITY_TIME = 3.0
 COOLDOWN_TIME = 1.5
 CONFIDENCE_THRESHOLD = 0.8
 SPACE_TIMEOUT = 1.2
@@ -62,6 +64,7 @@ def _new_session_state():
     """Fresh state for a new Socket.IO connection."""
     return {
         "smoother": PredictionSmoother(),
+        "stability_time": STABILITY_TIME,
         "text_builder": {
             "sentence": "",
             "current_letter": None,
@@ -206,7 +209,7 @@ def build_phase2_pose_sequence(text, speed_multiplier=1.0):
     }
 
 
-def update_text_builder(state, letter, confidence, hand_detected):
+def update_text_builder(state, letter, confidence, hand_detected, stability_time=STABILITY_TIME):
     """Advance the text-builder state machine by one frame. Mutates `state`."""
     current_time = time.time()
     result = {
@@ -248,8 +251,8 @@ def update_text_builder(state, letter, confidence, hand_detected):
     if letter == state["current_letter"]:
         if state["letter_start_time"]:
             elapsed = current_time - state["letter_start_time"]
-            result["stability_progress"] = min(1.0, elapsed / STABILITY_TIME)
-            if elapsed >= STABILITY_TIME:
+            result["stability_progress"] = min(1.0, elapsed / stability_time)
+            if elapsed >= stability_time:
                 state["sentence"] += letter
                 result["letter_added"] = letter
                 state["last_add_time"] = current_time
@@ -320,6 +323,7 @@ def process_client_frame(state, bgr_frame):
         prediction["letter"],
         prediction["confidence"],
         prediction["hand_detected"],
+        stability_time=state.get("stability_time", STABILITY_TIME),
     )
 
     return {
@@ -412,6 +416,26 @@ def handle_reset_stream():
     state["text_builder"]["current_letter"] = None
     state["text_builder"]["letter_start_time"] = None
     state["text_builder"]["no_hand_start_time"] = None
+
+
+@socketio.on('set_stability_time')
+def handle_set_stability_time(data):
+    """Client-chosen hold duration. Accepts {'value': 0.3..3.0} or raw float."""
+    state = sessions.get(_sid())
+    if state is None:
+        return
+    raw = data.get('value') if isinstance(data, dict) else data
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return
+    value = max(MIN_STABILITY_TIME, min(MAX_STABILITY_TIME, value))
+    state["stability_time"] = value
+    # In-progress letter timing is now ambiguous — reset it so the slider
+    # change doesn't retroactively add/reject a letter the user was holding.
+    state["text_builder"]["current_letter"] = None
+    state["text_builder"]["letter_start_time"] = None
+    emit('stability_time_updated', {'value': value})
 
 
 @socketio.on('clear_text')
