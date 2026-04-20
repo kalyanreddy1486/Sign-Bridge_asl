@@ -11,6 +11,7 @@ import os
 import sys
 import base64
 import time
+import threading
 import numpy as np
 import cv2
 import mediapipe as mp
@@ -40,6 +41,12 @@ socketio = SocketIO(app, cors_allowed_origins=_ALLOWED_ORIGINS, async_mode='thre
 model = None
 hands = None
 phase2_pose_library = {}
+
+# MediaPipe Hands is NOT thread-safe and keeps internal timestamp state.
+# Socket.IO runs each 'video_frame' event on a worker thread, so concurrent
+# visitors would race hands.process() and permanently corrupt its graph
+# ("Packet timestamp mismatch ..."). Serialize every call behind this lock.
+hands_lock = threading.Lock()
 
 # Per-session state, keyed by Socket.IO session id. Multiple HF Spaces
 # visitors each get their own smoother + text builder.
@@ -90,6 +97,7 @@ def initialize_mediapipe():
     global hands
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(
+        static_image_mode=True,
         max_num_hands=config.MEDIAPIPE["max_num_hands"],
         min_detection_confidence=config.MEDIAPIPE["min_detection_confidence"],
         min_tracking_confidence=config.MEDIAPIPE["min_tracking_confidence"],
@@ -275,7 +283,8 @@ def _decode_frame(data_url_or_b64):
 def process_client_frame(state, bgr_frame):
     """Run MediaPipe + model + text-builder on a client-supplied frame."""
     rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(rgb)
+    with hands_lock:
+        result = hands.process(rgb)
 
     prediction = {
         "hand_detected": False,
