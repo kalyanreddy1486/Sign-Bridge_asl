@@ -333,6 +333,111 @@ body {
   margin-left: 2px;
 }
 
+/* Settings row (hold time slider) */
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.setting {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+}
+
+.setting-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.setting-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--bg-soft);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.setting-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sage);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--sage), var(--shadow-sm);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.setting-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  background: var(--sage-dark);
+  box-shadow: 0 0 0 1px var(--sage-dark), var(--shadow-sm);
+}
+
+.setting-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--sage);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--sage), var(--shadow-sm);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.setting-slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  background: var(--sage-dark);
+  box-shadow: 0 0 0 1px var(--sage-dark), var(--shadow-sm);
+}
+
+.setting-slider::-moz-range-track {
+  height: 4px;
+  background: var(--bg-soft);
+  border-radius: 999px;
+}
+
+.setting-value {
+  font-family: 'Fraunces', serif;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.setting-value em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-left: 2px;
+}
+
+.setting-hint {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-style: italic;
+  letter-spacing: 0.02em;
+  padding-left: 2px;
+}
+
 /* Text card */
 .text-card {
   background: var(--surface);

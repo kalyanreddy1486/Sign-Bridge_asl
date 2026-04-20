@@ -14,6 +14,19 @@ const CAPTURE_HEIGHT = 360;
 const FRAME_INTERVAL_MS = 120; // ~8fps. Leaves headroom for server inference.
 const JPEG_QUALITY = 0.7;
 
+const HOLD_TIME_MIN = 0.3;
+const HOLD_TIME_MAX = 3.0;
+const HOLD_TIME_DEFAULT = 0.8;
+const HOLD_TIME_STORAGE_KEY = 'asl_hold_time';
+
+const readStoredHoldTime = () => {
+  if (typeof window === 'undefined') return HOLD_TIME_DEFAULT;
+  const raw = window.localStorage.getItem(HOLD_TIME_STORAGE_KEY);
+  const n = raw ? parseFloat(raw) : NaN;
+  if (!Number.isFinite(n)) return HOLD_TIME_DEFAULT;
+  return Math.min(HOLD_TIME_MAX, Math.max(HOLD_TIME_MIN, n));
+};
+
 const App = () => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -36,8 +49,10 @@ const App = () => {
   const [showAddedToast, setShowAddedToast] = useState(false);
   const [addedLetter, setAddedLetter] = useState('');
   const [facingMode, setFacingMode] = useState('user');
+  const [holdTime, setHoldTime] = useState(readStoredHoldTime);
 
   const socketRef = useRef(null);
+  const holdTimeRef = useRef(HOLD_TIME_DEFAULT);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -49,6 +64,16 @@ const App = () => {
     facingModeRef.current = facingMode;
   }, [facingMode]);
 
+  useEffect(() => {
+    holdTimeRef.current = holdTime;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(HOLD_TIME_STORAGE_KEY, String(holdTime));
+    }
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('set_stability_time', { value: holdTime });
+    }
+  }, [holdTime]);
+
   // ---------------------------------------------------------------------
   // Socket lifecycle
   // ---------------------------------------------------------------------
@@ -57,7 +82,11 @@ const App = () => {
     setSocket(newSocket);
     socketRef.current = newSocket;
 
-    const handleConnect = () => setConnected(true);
+    const handleConnect = () => {
+      setConnected(true);
+      // Re-apply the user's preferred hold time for the fresh server session.
+      newSocket.emit('set_stability_time', { value: holdTimeRef.current });
+    };
     const handleDisconnect = () => {
       setConnected(false);
     };
@@ -366,6 +395,28 @@ const App = () => {
             </span>
           </div>
         </div>
+
+        <div className="setting-row">
+          <label className="setting" htmlFor="hold-time-slider">
+            <span className="setting-label">hold time</span>
+            <input
+              id="hold-time-slider"
+              type="range"
+              min={HOLD_TIME_MIN}
+              max={HOLD_TIME_MAX}
+              step="0.1"
+              value={holdTime}
+              onChange={(e) => setHoldTime(parseFloat(e.target.value))}
+              className="setting-slider"
+              aria-label="Hold time — seconds to hold a sign before it registers"
+            />
+            <span className="setting-value">
+              {holdTime.toFixed(1)}
+              <em>s</em>
+            </span>
+          </label>
+          <span className="setting-hint">how long to hold a sign before it's added</span>
+        </div>
       </main>
 
       <div className="text-card">
@@ -455,7 +506,7 @@ const App = () => {
         <span>
           <kbd>esc</kbd> clear
         </span>
-        <span className="hint-meta">hold sign 0.8s to add · no hand 1.2s = space</span>
+        <span className="hint-meta">hold sign {holdTime.toFixed(1)}s to add · no hand 1.2s = space</span>
       </div>
 
       {showAddedToast && (
